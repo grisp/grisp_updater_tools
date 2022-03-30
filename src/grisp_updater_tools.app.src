@@ -1,0 +1,16 @@
+{application, grisp_updater_tools,
+ [{description, "GRiSP Software Update Tooling"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications,
+   [kernel,
+    stdlib,
+    getopt,
+    crypto
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
