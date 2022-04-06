@@ -150,28 +150,25 @@ package(Opts) ->
     } = Opts,
     ok = filelib:ensure_dir(filename:join(OutpuDir, ".")),
     ManifestFilename = filename:join(OutpuDir, "MANIFEST"),
-    RevManifest = [
-        {structure, [
-            {vfat, [
-                {sector_size, 512},
-                {partitions, [
-                    {R, [{type, T}, {start, B}, {size, S}]}
-                    || {R, T, B, S} <- FilesystemStructure
-                ]}
-            ]}
-        ]},
-        {architecture, <<"arm-grisp2-linux">>},
-        {description, unicode:characters_to_binary(maps:get(desc, Opts, ""))},
-        {version, unicode:characters_to_binary(ProductVersion)},
-        {product, unicode:characters_to_binary(ProductName)},
-        {format, {1, 0, 0}}
-    ],
+    Manifest = #{
+        format => <<"1.0.0">>,
+        product => unicode:characters_to_binary(ProductName),
+        version => unicode:characters_to_binary(ProductVersion),
+        description => unicode:characters_to_binary(maps:get(desc, Opts, "")),
+        architecture => <<"arm-grisp2-linux">>,
+        structure => #{
+            type => vfat,
+            sector_size => 512,
+            partitions => [
+                #{role => R, type => T, start => B, size => S}
+                || {R, T, B, S} <- FilesystemStructure
+            ]
+        }
+    },
     Objs = bootloader_objects(Opts, OutpuDir, []),
     Objs2 = rootfs_objects(Opts, OutpuDir, RootFilesytemFilename, Objs),
-    RevManifest2 = [{objects, Objs2} | RevManifest],
-    ManifestText = io_lib:format("%% coding: utf-8~n~tp.~n",
-                                 [lists:reverse(RevManifest2)]),
-    ManifestData = unicode:characters_to_binary(ManifestText),
+    ManifestData = jsx:encode(Manifest#{objects => Objs2},
+                              [{space, 1}, {indent, 2}]),
     file:write_file(ManifestFilename, ManifestData),
     erlang:halt(0).
 
@@ -180,29 +177,30 @@ bootloader_objects(#{bootloader_image := Filename}, OutputDir, Objs) ->
     Block = zlib:gzip(Data),
     BlockFilename = filename:join(OutputDir, <<"bootloader.gz">>),
     ok = file:write_file(BlockFilename, Block),
-    [{bootloader, [
-        {actions, [setup, bootloader]},
-        {product, <<"barebox">>},
-        {description, <<"Barebox Bootloader">>},
-        {target, {raw, [{context, global}, {offset, 0}]}},
-        {content, [
-            {block, [
-                {data_offset, 0},
-                {data_size, byte_size(Data)},
-                {data_hashes, [
-                    {sha256, base64:encode(crypto:hash(sha256, Data))},
-                    {crc32, erlang:crc32(Data)}
-                ]},
-                {block_format, gzip},
-                {block_size, byte_size(Block)},
-                {block_hashes, [
-                    {sha256, base64:encode(crypto:hash(sha256, Block))},
-                    {crc32, erlang:crc32(Block)}
-                ]},
-                {block_path, <<"bootloader.gz">>}
-            ]}
-        ]}
-    ]} | Objs];
+    [#{
+        type => bootloader,
+        actions => [setup, bootloader],
+        product => <<"barebox">>,
+        description => <<"Barebox Bootloader">>,
+        target => #{type => device, context => global, offset => 0},
+        content => [
+            #{
+                data_offset => 0,
+                data_size => byte_size(Data),
+                data_hashes => #{
+                    sha256 => base64:encode(crypto:hash(sha256, Data)),
+                    crc32 => erlang:crc32(Data)
+                },
+                block_format => gzip,
+                block_size => byte_size(Block),
+                block_hashes => #{
+                    sha256 => base64:encode(crypto:hash(sha256, Block)),
+                    crc32 => erlang:crc32(Block)
+                },
+                block_path => <<"bootloader.gz">>
+            }
+        ]
+    } | Objs];
 bootloader_objects(_Opts, _OutputDir, Objs) ->
     Objs.
 
@@ -211,11 +209,12 @@ rootfs_objects(#{block_size := Size}, OutputDir, InputFilename, Objs) ->
     BlockDir = filename:join(OutputDir, "rootfs"),
     ok = filelib:ensure_dir(filename:join(BlockDir, ",")),
     Blocks = rootfs_objects_blocks(Size, File, BlockDir, 0, 0, #{}, []),
-    [{rootfs, [
-        {actions, [setup, update]},
-        {offset, {system, 0}},
-        {content, Blocks}
-    ]} | Objs].
+    [#{
+        type => rootfs,
+        actions => [setup, update],
+        target => #{type => device, context => system, offset => 0},
+        content => Blocks
+    } | Objs].
 
 rootfs_objects_blocks(ReadSize, File, BlockDir, Index, Offset, Cache, Blocks) ->
     case file:read(File, ReadSize) of
@@ -240,20 +239,19 @@ rootfs_objects_blocks(ReadSize, File, BlockDir, Index, Offset, Cache, Blocks) ->
                          Index + 1, Size, Hash, Crc, RelPath}
                 end,
             rootfs_objects_blocks(ReadSize, File, BlockDir, Index2,
-                                  Offset + DataSize, Cache2, [
-                {block, [
-                    {data_offset, Offset},
-                    {data_size, DataSize},
-                    {data_hashes, [
-                        {sha256, base64:encode(DataBinHash)},
-                        {crc32, erlang:crc32(Data)}
-                    ]},
-                    {block_format, gzip},
-                    {block_size, BlockSize},
-                    {block_hashes, [
-                        {sha256, BlockHash},
-                        {crc32, BlockCrc}
-                    ]},
-                    {block_path, BlockRelPath}
-                ]} | Blocks])
+                                  Offset + DataSize, Cache2, [#{
+                    data_offset => Offset,
+                    data_size => DataSize,
+                    data_hashes => #{
+                        sha256 => base64:encode(DataBinHash),
+                        crc32 => erlang:crc32(Data)
+                    },
+                    block_format => gzip,
+                    block_size => BlockSize,
+                    block_hashes => #{
+                        sha256 => BlockHash,
+                        crc32 => BlockCrc
+                    },
+                    block_path => BlockRelPath
+                } | Blocks])
     end.

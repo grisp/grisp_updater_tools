@@ -6,6 +6,7 @@
    [kernel,
     stdlib,
     getopt,
+    jsx,
     crypto
    ]},
   {env,[]},
