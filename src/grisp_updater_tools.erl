@@ -213,7 +213,7 @@ rootfs_objects(#{block_size := Size}, OutputDir, InputFilename, Objs) ->
     Blocks = rootfs_objects_blocks(Size, File, BlockDir, 0, 0, #{}, []),
     [{rootfs, [
         {actions, [setup, update]},
-        {offset, {system, 0}},
+        {target, {raw, {context, system}, {offset, 0}}},
         {content, Blocks}
     ]} | Objs].
 
