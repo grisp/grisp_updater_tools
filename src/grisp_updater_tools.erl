@@ -132,9 +132,14 @@ proplists_to_map(List) ->
     ).
 
 parse_structure(Struct) ->
-    [{system, dos, A, B}
-     || [A, B] <- [[list_to_integer(I) || I <- string:split(P, ":")]
-                   || P <- string:split(Struct, ",")]].
+    [{system, I, dos, A, B}
+     || {I, [A, B]} <- index([[list_to_integer(I) || I <- string:split(P, ":")]
+                              || P <- string:split(Struct, ",")])].
+
+index(L) -> index(L, 0, []).
+
+index([], _C, Acc) -> lists:reverse(Acc);
+index([E | R], C, Acc) -> index(R, C + 1, [{C, E} | Acc]).
 
 usage() ->
     getopt:usage(opts_spec(), "grisp_updater_tools"),
@@ -143,32 +148,33 @@ usage() ->
 package(Opts) ->
     #{
         name := ProductName,
-        version := ProductVersion,
+        version := ProductVersionOpt,
         structure := FilesystemStructure,
         rootfs_image := RootFilesytemFilename,
         output_dir := OutpuDir
     } = Opts,
+    ProductVersion = parse_version(ProductVersionOpt),
     ok = filelib:ensure_dir(filename:join(OutpuDir, ".")),
     ManifestFilename = filename:join(OutpuDir, "MANIFEST"),
     RevManifest = [
-        {structure, [
+        {structure,
             {vfat, [
                 {sector_size, 512},
                 {partitions, [
-                    {R, [{type, T}, {start, B}, {size, S}]}
-                    || {R, T, B, S} <- FilesystemStructure
+                    {R, [{id, I}, {type, T}, {start, B}, {size, S}]}
+                    || {R, I, T, B, S} <- FilesystemStructure
                 ]}
             ]}
-        ]},
+        },
         {architecture, <<"arm-grisp2-linux">>},
         {description, unicode:characters_to_binary(maps:get(desc, Opts, ""))},
-        {version, unicode:characters_to_binary(ProductVersion)},
+        {version, ProductVersion},
         {product, unicode:characters_to_binary(ProductName)},
         {format, {1, 0, 0}}
     ],
     Objs = bootloader_objects(Opts, OutpuDir, []),
     Objs2 = rootfs_objects(Opts, OutpuDir, RootFilesytemFilename, Objs),
-    RevManifest2 = [{objects, Objs2} | RevManifest],
+    RevManifest2 = [{objects, lists:reverse(Objs2)} | RevManifest],
     ManifestText = io_lib:format("%% coding: utf-8~n~tp.~n",
                                  [lists:reverse(RevManifest2)]),
     ManifestData = unicode:characters_to_binary(ManifestText),
@@ -213,7 +219,7 @@ rootfs_objects(#{block_size := Size}, OutputDir, InputFilename, Objs) ->
     Blocks = rootfs_objects_blocks(Size, File, BlockDir, 0, 0, #{}, []),
     [{rootfs, [
         {actions, [setup, update]},
-        {target, {raw, {context, system}, {offset, 0}}},
+        {target, {raw, [{context, system}, {offset, 0}]}},
         {content, Blocks}
     ]} | Objs].
 
@@ -256,4 +262,20 @@ rootfs_objects_blocks(ReadSize, File, BlockDir, Index, Offset, Cache, Blocks) ->
                     ]},
                     {block_path, BlockRelPath}
                 ]} | Blocks])
+    end.
+
+parse_version({A, B, C})
+  when is_integer(A), A >= 0, is_integer(B), B >= 0, is_integer(C), C >= 0 ->
+    {A, B, C};
+parse_version(N) when is_integer(N) ->
+    {N, 0, 0};
+parse_version(Str) when is_list(Str) ->
+    parse_version(unicode:characters_to_binary(Str));
+parse_version(Bin) when is_binary(Bin) ->
+    case re:run(Bin, "^([0-9]*)\.([0-9]*)\.([0-9]*)$",
+                [{capture, all, binary}]) of
+        {match, [_, A, B, C]} ->
+            {binary_to_integer(A), binary_to_integer(B), binary_to_integer(C)};
+        _ ->
+            Bin
     end.
