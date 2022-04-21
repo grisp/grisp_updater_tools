@@ -247,8 +247,12 @@ fi
 echo "*** PREPARING SOFTWARE PACKAGE..."
 rm -rf "${SOFTWARE_PACKAGE}"
 ROOTFS_IMAGE="${SOFTWARE_PACKAGE}.rootfs"
+BOOTLOADER_IMAGE="${SOFTWARE_PACKAGE}.bootloader"
 rm -f "${ROOTFS_IMAGE}"
-sdifa_extract 0 "${ROOTFS_IMAGE}"
+rm -f "${BOOTLOADER_IMAGE}"
+sdifa_extract_partition 0 "${ROOTFS_IMAGE}"
+BOOTLOADER_SIZE=$( sdifa_filesize "$BAREBOX_IMG" )
+sdifa_extract 0 $BOOTLOADER_SIZE "${BOOTLOADER_IMAGE}"
 $GRISP_UPDATE_TOOLS --name="$ERLANG_APP_NAME" \
                     --version="$ERLANG_APP_VSN" \
                     --bootloader-image="$BAREBOX_IMG" \
@@ -258,6 +262,7 @@ $GRISP_UPDATE_TOOLS --name="$ERLANG_APP_NAME" \
 tar cf "${SOFTWARE_PACKAGE}.tar" -C "${SOFTWARE_PACKAGE}" .
 rm -rf "${SOFTWARE_PACKAGE}"
 rm -f "${ROOTFS_IMAGE}"
+rm -f "${BOOTLOADER_IMAGE}"
 
 if [[ $COMPRESS_IMAGE == 1 ]]; then
 	echo "*** COMPRESSING OUTPUT IMAGE AND CLEANING UP..."

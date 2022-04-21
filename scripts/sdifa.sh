@@ -117,6 +117,16 @@ _darwin_partition_mountpoint() {
 	_trim $( _xml_node_values  " " "$mountpoint_xml" )
 }
 
+_sdifa_gcd() {
+	local a="$1"
+	local b="$2"
+	if (( ( $a % $b ) == 0 )); then
+		echo $b
+	else
+		_sdifa_gcd $b $(( $a % $b ))
+	fi
+}
+
 
 ### Public Functions ###########################################################
 
@@ -170,7 +180,17 @@ sdifa_reset() {
 }
 
 sdifa_filesize() {
-	stat --printf="%s" "$1"
+	case "$SDIFA_OS" in
+		linux)
+			stat --printf="%s" "$1"
+			;;
+		darwin)
+			stat -f%z "$1"
+			;;
+		*)
+			sdifa_error 1 "Unsupported OS: $SDIFA_OS"
+			;;
+	esac
 }
 
 # Start and image creation session with an empty image.
@@ -478,12 +498,12 @@ sdifa_truncate() {
 # Arguments:
 #   1: Partition number (starting at 0)
 #   2: File the partition data should be extracted into
-sdifa_extract() {
+sdifa_extract_partition() {
 	local part_num="$1"
 	local part_file="$2"
 	_check_has_partition "$part_num"
 	if [[ -f $part_file ]]; then
-		sdifa_error 1 "Partition file aleready exists: $part_file"
+		sdifa_error 1 "Partition file allready exists: $part_file"
 	fi
 	local part_sec="${SDIFA_IMAGE_PARTS[$part_num*7+4]}"
 	local part_start="${SDIFA_IMAGE_PARTS[$part_num*7+5]}"
@@ -501,6 +521,37 @@ sdifa_extract() {
 	case "$SDIFA_OS" in
 		linux | darwin)
 			dd conv=sparse,notrunc if="$SDIFA_IMAGE_TEMPFILE" of="$part_file" bs=1048576 skip="$block_start" count="$block_size" || exit $?
+			;;
+		*)
+			sdifa_error 1 "Unsupported OS: $SDIFA_OS"
+			;;
+	esac
+}
+
+# Extract data from the current image
+# Arguments:
+#   1: Start of the data in bytes
+#   2: Size of the data in bytes
+sdifa_extract() {
+	local start_bytes="$1"
+	local size_bytes="$2"
+	local file="$3"
+	_check_image_tempfile
+	if [[ -f $file ]]; then
+		sdifa_error 1 "Output file allready exists: $file"
+	fi
+	local block_size=$( _sdifa_gcd $start_bytes $size_bytes )
+	if (( $block_size > 1048576 )); then
+		sdifa_error 1 "Block size too big: $block_size"
+	fi
+	if (( $block_size < 0 )); then
+		sdifa_error 1 "Invalid block size: $block_size"
+	fi
+	local start_blocks=$(( $start_bytes / $block_size ))
+	local size_blocks=$(( $size_bytes / $block_size ))
+	case "$SDIFA_OS" in
+		linux | darwin)
+			dd conv=sparse,notrunc if="$SDIFA_IMAGE_TEMPFILE" of="$file" bs="$block_size" skip="$start_blocks" count="$size_blocks" || exit $?
 			;;
 		*)
 			sdifa_error 1 "Unsupported OS: $SDIFA_OS"
