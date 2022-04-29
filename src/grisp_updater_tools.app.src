@@ -6,7 +6,8 @@
    [kernel,
     stdlib,
     getopt,
-    crypto
+    crypto,
+    uuid
    ]},
   {env,[]},
   {modules, []},

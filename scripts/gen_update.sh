@@ -256,7 +256,7 @@ sdifa_extract 0 $BOOTLOADER_SIZE "${BOOTLOADER_IMAGE}"
 $GRISP_UPDATE_TOOLS --name="$ERLANG_APP_NAME" \
                     --version="$ERLANG_APP_VSN" \
                     --bootloader-image="$BAREBOX_IMG" \
-                    "8192:524288,532480:524288" \
+                    "mbr=system:dos:8192:524288,system:dos:532480:524288" \
                     "${ROOTFS_IMAGE}" \
                     "${SOFTWARE_PACKAGE}"
 tar cf "${SOFTWARE_PACKAGE}.tar" -C "${SOFTWARE_PACKAGE}" .
