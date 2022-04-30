@@ -222,7 +222,7 @@ if [[ $RTEMS_SHELL == 1 ]]; then
 	make demo
 	echo "*** DEPLOYING RTEMS DEMO TO SYSTEM PARTITION A..."
 	cp demo/b-imx7/demo.zImage "${MOUNTPOINT}/shell.zImage"
-	DTBFILE="$( cd "$MOUNTPOINT"; find . -name imx6ul-grisp2.dtb )"
+	DTBFILE="$( cd "$MOUNTPOINT"; find . -name imx6ul-grisp2.dtb -print -quit )"
 	if [ ! -f "${MOUNTPOINT}/${DTBFILE}" ]; then
 		echo "ERROR: Device tree not found in deployed erlang application"
 		false # jump to the cleanup hook
