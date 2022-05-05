@@ -19,8 +19,11 @@ main([]) -> usage();
 main(Args) ->
     case getopt:parse(opts_spec(), Args) of
         {ok, {OptList, []}} ->
+            SysFiles = lists_getall(system_file, OptList),
             Cmd = command(OptList),
-            perform(Cmd, validate(Cmd, proplists_to_map(OptList)));
+            Opts = proplists_to_map(OptList),
+            Opts2 = Opts#{system_file => SysFiles},
+            perform(Cmd, validate(Cmd, Opts2));
         {ok, {_Opts, Extra}} ->
             command_error("Unexpected extra parameters: ~p~n", [Extra]);
         {error, {Reason, Data}} ->
@@ -51,6 +54,8 @@ opts_spec() -> [
          "Kernel image"},
     {architecture,     undefined,       "architecture",  {string, "arm-grisp2-rtems"},
          "Architecture; e.g. arm-grisp2-rtems, x86_64-vendor-linux"},
+    {system_file,      undefined,        "system-file",    string,
+         "Extra system file as NAME:REAL_PATH:SYSTEM_PATH; e.g. key:build/rootfs.ext2.encrypted.key:/boot/rootfs_key"},
     {structure,        undefined,            undefined,  string,
          "Filesystem structure, either MBR or GPT; "
          "mbr=(START:SIZE[,])* e.g. mbr=24576:507904,548864:507904 "
@@ -71,7 +76,9 @@ command(Opts) ->
         false -> package
     end.
 
-validate(package, #{structure := Struct} = Opts) ->
+validate(package, Opts) ->
+    Struct = maps:get(structure, Opts, undefined),
+    SysFiles = maps:get(system_file, Opts, []),
     required(Opts, name, "software product name"),
     required(Opts, version, "software product version"),
     required(Opts, structure, "filesystem structure"),
@@ -83,9 +90,20 @@ validate(package, #{structure := Struct} = Opts) ->
     file_exists(Opts, kernel_image, "kernel image"),
     required_if(Opts, kernel_image, kernel_path, "kernel path"),
     required_if(Opts, kernel_path, kernel_image, "kernel image"),
-    Opts#{structure => parse_structure(Struct)};
+    Opts#{structure => parse_structure(Struct),
+          system_file => parse_sysfiles(SysFiles)};
 validate(_Cmd, Opts) ->
     Opts.
+
+lists_getall(Key, List) ->
+    lists_getall(Key, List, []).
+
+lists_getall(_Key, [], Acc) ->
+    lists:reverse(Acc);
+lists_getall(Key, [{Key, Val} | Rest], Acc) ->
+    lists_getall(Key, Rest, [Val | Acc]);
+lists_getall(Key, [_ | Rest], Acc) ->
+    lists_getall(Key, Rest, Acc).
 
 required(Opts, Name, Desc) ->
     case maps:find(Name, Opts) of
@@ -153,6 +171,8 @@ proplists_to_map(List) ->
         List
     ).
 
+parse_structure(undefined) ->
+    undefined;
 parse_structure("mbr=" ++ Struct) ->
     {mbr, [{partition_role(Role), mbr_type(Type),
             list_to_integer(Start), list_to_integer(Size)}
@@ -165,11 +185,13 @@ parse_structure("gpt=" ++ Struct) ->
             list_to_integer(Size)}
            || [Role, Type, UUID, Start, Size]
                 <- [string:split(P, ":", all)
-                    || P <- string:split(Struct, ",", all)]]}.
+                    || P <- string:split(Struct, ",", all)]]};
+parse_structure(Struct) ->
+    command_error("Invalid specified structure: ~p~n", [Struct]).
 
 partition_role("system") -> system;
 partition_role("boot") -> boot;
-partition_role("user") -> user.
+partition_role("data") -> data.
 
 mbr_type("dos") -> dos.
 
@@ -182,6 +204,24 @@ gpt_type("V") -> "e6d6d379-f507-44c2-a23c-238f2a3df928";
 gpt_type("F") -> "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7";
 gpt_type(UUID) when is_list(UUID) -> UUID.
 
+parse_sysfiles(SysFiles) ->
+    parse_sysfiles(SysFiles, []).
+
+parse_sysfiles([], Acc) ->
+    lists:reverse(Acc);
+parse_sysfiles([Val | Rest], Acc) ->
+    case string:split(Val, ":", all) of
+        [Name, Local, "/" ++ _ = Target] ->
+            case filelib:is_file(Local) of
+                false -> command_error("System file not found: ~s~n", [Local]);
+                true ->
+                    Tup = {list_to_binary(Name), list_to_binary(Local), list_to_binary(Target)},
+                    parse_sysfiles(Rest, [Tup | Acc])
+            end;
+        [_, _, Target] ->
+            command_error("Bad system file target: ~s~n", [Target])
+    end.
+
 usage() ->
     getopt:usage(opts_spec(), "grisp_updater_tools"),
     erlang:halt(0).
@@ -191,14 +231,14 @@ package(#{architecture := Arch} = Opts) ->
         name := ProductName,
         version := ProductVersionOpt,
         structure := FilesystemStructure,
+        system_file := SysFiles,
         rootfs_image := RootFilesytemFilename,
         output_dir := OutpuDir
     } = Opts,
     ProductVersion = parse_version(ProductVersionOpt),
     ok = filelib:ensure_dir(filename:join(OutpuDir, ".")),
     ManifestFilename = filename:join(OutpuDir, "MANIFEST"),
-    RevManifest = [
-        {structure, structure(FilesystemStructure)},
+    RevManifest = structure(FilesystemStructure) ++ [
         {architecture, iolist_to_binary(Arch)},
         {description, unicode:characters_to_binary(maps:get(desc, Opts, ""))},
         {version, ProductVersion},
@@ -207,24 +247,27 @@ package(#{architecture := Arch} = Opts) ->
     ],
     Objs = bootloader_objects(Opts, OutpuDir, []),
     Objs2 = kernel_objects(Opts, OutpuDir, Objs),
-    Objs3 = rootfs_objects(Opts, OutpuDir, RootFilesytemFilename, Objs2),
-    RevManifest2 = [{objects, lists:reverse(Objs3)} | RevManifest],
+    Objs3 = system_objects(Opts, OutpuDir, SysFiles, Objs2),
+    Objs4 = rootfs_objects(Opts, OutpuDir, RootFilesytemFilename, Objs3),
+    RevManifest2 = [{objects, lists:reverse(Objs4)} | RevManifest],
     ManifestText = io_lib:format("%% coding: utf-8~n~tp.~n",
                                  [lists:reverse(RevManifest2)]),
     ManifestData = unicode:characters_to_binary(ManifestText),
     file:write_file(ManifestFilename, ManifestData),
     erlang:halt(0).
 
+structure(undefined) ->
+    [];
 structure({mbr, Structure}) ->
-    {mbr, [
+    [{structure, {mbr, [
         {sector_size, 512},
         {partitions,  partitions_mbr(Structure, 0, [])}
-    ]};
+    ]}}];
 structure({gpt, Structure}) ->
-    {gpt, [
+    [{structure, {gpt, [
         {sector_size, 512},
         {partitions,  partitions_gpt(Structure, 0, [])}
-    ]}.
+    ]}}].
 
 partitions_mbr([], _Id, Acc) -> lists:reverse(Acc);
 partitions_mbr([{system, T, B, S} | Rest], Id, Acc) ->
@@ -287,6 +330,17 @@ kernel_objects(#{kernel_image := Filename, kernel_path := Path} = Opts,
     ]} | Objs];
 kernel_objects(_Opts, _OutputDir, Objs) ->
     Objs.
+
+system_objects(_Opts, _OutputDir, [], Objs) ->
+    Objs;
+system_objects(Opts, OutputDir, [{Name, Local, Target} | Rest], Objs) ->
+    Blocks = generate_blocks(Opts, OutputDir, Local, Name),
+    Objs2 = [{binary_to_atom(Name), [
+        {actions, [setup, update]},
+        {target, {file, [{context, system}, {path, Target}]}},
+        {content, Blocks}
+    ]} | Objs],
+    system_objects(Opts, OutputDir, Rest, Objs2).
 
 rootfs_objects(Opts, OutputDir, InputFilename, Objs) ->
     Blocks = generate_blocks(Opts, OutputDir, InputFilename, <<"rootfs">>),
