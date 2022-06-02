@@ -55,7 +55,8 @@ opts_spec() -> [
     {architecture,     undefined,       "architecture",  {string, "arm-grisp2-rtems"},
          "Architecture; e.g. arm-grisp2-rtems, x86_64-vendor-linux"},
     {system_file,      undefined,        "system-file",    string,
-         "Extra system file as NAME:REAL_PATH:SYSTEM_PATH; e.g. key:build/rootfs.ext2.encrypted.key:/boot/rootfs_key"},
+         "Extra system file as NAME:SYSTEM_PATH:REAL_PATH[:REAL_URL]; "
+         "e.g. key:/boot/rootfs_key:build/rootfs.ext2.encrypted.key:https://server.com/rootfs.ext2.encrypted.key"},
     {structure,        undefined,            undefined,  string,
          "Filesystem structure, either MBR or GPT; "
          "mbr=(START:SIZE[,])* e.g. mbr=24576:507904,548864:507904 "
@@ -177,7 +178,7 @@ parse_structure("mbr=" ++ Struct) ->
     {mbr, [{partition_role(Role), mbr_type(Type),
             list_to_integer(Start), list_to_integer(Size)}
            || [Role, Type, Start, Size]
-           <- [string:split(P, ":", all)
+           <- [string_split(P, ":", all)
                || P <- string:split(Struct, ",", all)]]};
 parse_structure("gpt=" ++ Struct) ->
     {gpt, [{partition_role(Role), uuid:string_to_uuid(gpt_type(Type)),
@@ -207,18 +208,43 @@ gpt_type(UUID) when is_list(UUID) -> UUID.
 parse_sysfiles(SysFiles) ->
     parse_sysfiles(SysFiles, []).
 
+string_split(Val, Sep, Count) ->
+    string_split(Val, Sep, Count - 1, []).
+
+string_split(Val, _Sep, 0, Acc) ->
+    lists:reverse([Val | Acc]);
+string_split(Val, Sep, Count, Acc) ->
+    case string:split(Val, Sep) of
+        [Val] -> lists:reverse([Val | Acc]);
+        [Field, Rest] -> string_split(Rest, Sep, Count - 1, [Field | Acc])
+    end.
+
 parse_sysfiles([], Acc) ->
     lists:reverse(Acc);
 parse_sysfiles([Val | Rest], Acc) ->
-    case string:split(Val, ":", all) of
-        [Name, Local, "/" ++ _ = Target] ->
-            case filelib:is_file(Local) of
-                false -> command_error("System file not found: ~s~n", [Local]);
+    case string_split(Val, ":", 4) of
+        [Name, "/" ++ _ = Target, Source, Url] ->
+            case uri_string:parse(Url) of
+                #{scheme := Schem} when Schem =:= "http"; Schem =:= "https" ->
+                    case filelib:is_file(Source) of
+                        false -> command_error("System file not found: ~s~n", [Source]);
+                        true ->
+                            Tup = {list_to_binary(Name), list_to_binary(Source),
+                                   list_to_binary(Target), list_to_binary(Url)},
+                            parse_sysfiles(Rest, [Tup | Acc])
+                    end;
+                _ ->
+                    command_error("Bad system file URL: ~s~n", [Url])
+            end;
+        [Name, "/" ++ _ = Target, Source] ->
+            case filelib:is_file(Source) of
+                false -> command_error("System file not found: ~s~n", [Source]);
                 true ->
-                    Tup = {list_to_binary(Name), list_to_binary(Local), list_to_binary(Target)},
+                    Tup = {list_to_binary(Name), list_to_binary(Source),
+                           list_to_binary(Target)},
                     parse_sysfiles(Rest, [Tup | Acc])
             end;
-        [_, _, Target] ->
+        [_, Target, _] ->
             command_error("Bad system file target: ~s~n", [Target])
     end.
 
@@ -333,6 +359,14 @@ kernel_objects(_Opts, _OutputDir, Objs) ->
 
 system_objects(_Opts, _OutputDir, [], Objs) ->
     Objs;
+system_objects(Opts, OutputDir, [{Name, Local, Target, Url} | Rest], Objs) ->
+    Blocks = generate_refblocks(Opts, Local, Url),
+    Objs2 = [{binary_to_atom(Name), [
+        {actions, [setup, update]},
+        {target, {file, [{context, system}, {path, Target}]}},
+        {content, Blocks}
+    ]} | Objs],
+    system_objects(Opts, OutputDir, Rest, Objs2);
 system_objects(Opts, OutputDir, [{Name, Local, Target} | Rest], Objs) ->
     Blocks = generate_blocks(Opts, OutputDir, Local, Name),
     Objs2 = [{binary_to_atom(Name), [
@@ -349,6 +383,44 @@ rootfs_objects(Opts, OutputDir, InputFilename, Objs) ->
         {target, {raw, [{context, system}, {offset, 0}]}},
         {content, Blocks}
     ]} | Objs].
+
+file_info(Filename) ->
+    case file:open(Filename, [raw, read, binary]) of
+        {error, Reason} ->
+            command_error("Error opening file ~s: ~p~n", [Filename, Reason]);
+        {ok, File} ->
+            try
+                {Size, Crc32, HashCtx} = file_info(Filename, File, 0,
+                            erlang:crc32(<<>>), crypto:hash_init(sha256)),
+                {Size, Crc32, crypto:hash_final(HashCtx)}
+            after
+                file:close(File)
+            end
+    end.
+
+file_info(Filename, File, Size, Crc32, HashCtx) ->
+    case file:read(File, 256 * 1024) of
+        eof -> {Size, Crc32, HashCtx};
+        {ok, Data} ->
+            file_info(Filename, File, Size + byte_size(Data),
+                      erlang:crc32(Crc32, Data),
+                      crypto:hash_update(HashCtx, Data));
+        {error, Reason} ->
+            command_error("Error reading file ~s: ~p~n", [Filename, Reason])
+    end.
+
+generate_refblocks(_Opts, InputFilename, Url) ->
+    {DataSize, DataCrc, DataHashBin} = file_info(InputFilename),
+    [{block, [
+        {data_offset, 0},
+        {data_size, DataSize},
+        {data_hashes, [
+            {sha256, base64:encode(DataHashBin)},
+            {crc32, DataCrc}
+        ]},
+        {block_format, raw},
+        {block_path, Url}
+    ]}].
 
 generate_blocks(#{block_size := Size}, OutputDir, InputFilename, SubDir) ->
     {ok, File} = file:open(InputFilename, [read, raw, binary]),
