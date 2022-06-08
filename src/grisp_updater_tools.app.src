@@ -7,7 +7,8 @@
     stdlib,
     getopt,
     crypto,
-    uuid
+    uuid,
+    termseal
    ]},
   {env,[]},
   {modules, []},

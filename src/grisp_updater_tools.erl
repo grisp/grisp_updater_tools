@@ -44,6 +44,8 @@ opts_spec() -> [
          "Software product description"},
     {block_size,              $b,         "block-size", {integer, 4194304},
          "Update block size"},
+    {key_file,         undefined,           "key-file",  string,
+         "Signing key PEM file"},
     {bootloader_image, undefined,   "bootloader-image",  string,
          "Bootloader image"},
     {bootloader_ver,   undefined, "bootloader-version",  string,
@@ -89,9 +91,11 @@ validate(package, Opts) ->
     does_not_exist(Opts, output_dir, "output directory"),
     file_exists(Opts, bootloader_image, "bootloader image"),
     file_exists(Opts, kernel_image, "kernel image"),
+    KeyFile = file_exists(Opts, key_file, "signing key PEM file"),
     required_if(Opts, kernel_image, kernel_path, "kernel path"),
     required_if(Opts, kernel_path, kernel_image, "kernel image"),
     Opts#{structure => parse_structure(Struct),
+          signing_key => load_key(KeyFile),
           system_file => parse_sysfiles(SysFiles)};
 validate(_Cmd, Opts) ->
     Opts.
@@ -120,7 +124,7 @@ required_if(Opts, Dep, Name, Desc) ->
 
 file_exists(Opts, Name, Desc) ->
     case maps:find(Name, Opts) of
-        error -> ok;
+        error -> undefined;
         {ok, Filename} ->
             case filelib:is_file(Filename) of
                 false ->
@@ -132,7 +136,7 @@ file_exists(Opts, Name, Desc) ->
                             command_error("Specified ~s not a file: ~s~n",
                                           [Desc, Filename]);
                         true ->
-                            ok
+                            Filename
                     end
             end
     end.
@@ -148,6 +152,21 @@ does_not_exist(Opts, Name, Desc) ->
                 false ->
                     ok
             end
+    end.
+
+load_key(undefined) -> undefined;
+load_key(PEMFile) ->
+    try termseal:load_private_key(PEMFile)
+    catch
+        {read_error, Reason, Filename} ->
+            command_error("Failed to read signing key (~p): ~s~n",
+                          [Reason, Filename]);
+        {key_not_found, Filename} ->
+            command_error("Signing key PEM file not found: ~s~n",
+                          [Filename]);
+        {too_many_keys, Filename} ->
+            command_error("Signing key PEM file with multiple keys: ~s~n",
+                          [Filename])
     end.
 
 perform(help, _Opts) -> usage();
@@ -252,9 +271,30 @@ usage() ->
     getopt:usage(opts_spec(), "grisp_updater_tools"),
     erlang:halt(0).
 
-package(#{architecture := Arch} = Opts) ->
+package(Opts) ->
+    Manifest = create_manifest(Opts),
+    save_plain_manifest(Manifest, Opts),
+    save_sealed_manifest(Manifest, Opts),
+    erlang:halt(0).
+
+save_plain_manifest(Manifest, Opts) ->
+    #{output_dir := OutpuDir} = Opts,
+    ok = filelib:ensure_dir(filename:join(OutpuDir, ".")),
+    ManifestFilename = filename:join(OutpuDir, "MANIFEST"),
+    ManifestText = io_lib:format("%% coding: utf-8~n~tp.~n", [Manifest]),
+    ManifestData = unicode:characters_to_binary(ManifestText),
+    file:write_file(ManifestFilename, ManifestData).
+
+save_sealed_manifest(Manifest, #{signing_key := Key} = Opts) ->
+    #{output_dir := OutpuDir} = Opts,
+    Box = termseal:seal(Manifest, Key),
+    SealedManifestFilename = filename:join(OutpuDir, "MANIFEST.sealed"),
+    file:write_file(SealedManifestFilename, Box).
+
+create_manifest(Opts) ->
     #{
         name := ProductName,
+        architecture := Arch,
         version := ProductVersionOpt,
         structure := FilesystemStructure,
         system_file := SysFiles,
@@ -263,7 +303,6 @@ package(#{architecture := Arch} = Opts) ->
     } = Opts,
     ProductVersion = parse_version(ProductVersionOpt),
     ok = filelib:ensure_dir(filename:join(OutpuDir, ".")),
-    ManifestFilename = filename:join(OutpuDir, "MANIFEST"),
     RevManifest = structure(FilesystemStructure) ++ [
         {architecture, iolist_to_binary(Arch)},
         {description, unicode:characters_to_binary(maps:get(desc, Opts, ""))},
@@ -276,11 +315,7 @@ package(#{architecture := Arch} = Opts) ->
     Objs3 = system_objects(Opts, OutpuDir, SysFiles, Objs2),
     Objs4 = rootfs_objects(Opts, OutpuDir, RootFilesytemFilename, Objs3),
     RevManifest2 = [{objects, lists:reverse(Objs4)} | RevManifest],
-    ManifestText = io_lib:format("%% coding: utf-8~n~tp.~n",
-                                 [lists:reverse(RevManifest2)]),
-    ManifestData = unicode:characters_to_binary(ManifestText),
-    file:write_file(ManifestFilename, ManifestData),
-    erlang:halt(0).
+    lists:reverse(RevManifest2).
 
 structure(undefined) ->
     [];
