@@ -227,9 +227,16 @@ gpt_type(UUID) when is_list(UUID) -> UUID.
 parse_sysfiles(SysFiles) ->
     parse_sysfiles(SysFiles, []).
 
+string_split(Val, Sep, all) ->
+    string_split(Val, Sep, all, []);
 string_split(Val, Sep, Count) ->
     string_split(Val, Sep, Count - 1, []).
 
+string_split(Val, Sep, all, Acc) ->
+    case string:split(Val, Sep) of
+        [Val] -> lists:reverse([Val | Acc]);
+        [Field, Rest] -> string_split(Rest, Sep, all, [Field | Acc])
+    end;
 string_split(Val, _Sep, 0, Acc) ->
     lists:reverse([Val | Acc]);
 string_split(Val, Sep, Count, Acc) ->
@@ -237,6 +244,7 @@ string_split(Val, Sep, Count, Acc) ->
         [Val] -> lists:reverse([Val | Acc]);
         [Field, Rest] -> string_split(Rest, Sep, Count - 1, [Field | Acc])
     end.
+
 
 parse_sysfiles([], Acc) ->
     lists:reverse(Acc);
