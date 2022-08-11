@@ -12,6 +12,7 @@ BAREBOX_IMG_FILENAME="barebox-phytec-phycore-imx6ul-emmc-512mb.img"
 BAREBOX_RELDIR="barebox"
 DEFAULT_BASENAME="grisp2"
 IMAGE_FILE_EXT=".img"
+DTB_FILE="imx6ul-grisp2.dtb"
 
 IMAGE_FILE=""
 SOFTWARE_PACKAGE=""
@@ -26,10 +27,11 @@ TRUNCATE=1
 RTEMS_SHELL=0
 COMPRESS_IMAGE=0
 PACKAGE_BLOCK_SIZE=4
+KEEP_ROOTFS=0
 
 function usage() {
 	local code="${1:-0}"
-	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE]"
+	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE] [-c DEVICE_TREE_FILE]"
 	echo "  -h: Show this help"
 	echo "  -d: Show debugging"
 	echo "  -f: Force the overwrite of the output files"
@@ -51,6 +53,9 @@ function usage() {
 	echo "    default: ${DEFAULT_BASENAME}.APP_NAME.APP_VSN.tar"
 	echo "  -b PACKAGE_BLOCK_SIZE: Size of update blocks in MiB"
 	echo "    default: $PACKAGE_BLOCK_SIZE"
+	echo "  -c DEVICE_TREE_FILE: The name of the device tree file in the toolchain"
+	echo "    default: ${DTB_FILE}"
+	echo "  -k: Keep rootfs file. if -z is specified it will be compressed."
 	echo "e.g."
 	echo "       $0 -sz -t /opt/grisp/grisp2-rtems-toolchain -a ../grisp_demo -n grisp_demo -v 0.1.0"
 	echo
@@ -67,7 +72,7 @@ function error() {
 
 sdifa_check
 
-while getopts "hdfszt:i:a:n:v:o:u:b:" o; do
+while getopts "hdfszt:i:a:n:v:o:u:b:c:k" o; do
 	case "${o}" in
 		h)
 			usage
@@ -109,6 +114,12 @@ while getopts "hdfszt:i:a:n:v:o:u:b:" o; do
 			;;
 		b)
 			PACKAGE_BLOCK_SIZE="${OPTARG}"
+			;;
+		c)
+			DTB_FILE="${OPTARG}"
+			;;
+		k)
+			KEEP_ROOTFS=1
 			;;
 		*)
 			usage 1
@@ -222,7 +233,7 @@ if [[ $RTEMS_SHELL == 1 ]]; then
 	make demo
 	echo "*** DEPLOYING RTEMS DEMO TO SYSTEM PARTITION A..."
 	cp demo/b-imx7/demo.zImage "${MOUNTPOINT}/shell.zImage"
-	DTBFILE="$( cd "$MOUNTPOINT"; find . -name imx6ul-grisp2.dtb -print -quit )"
+	DTBFILE="$( cd "$MOUNTPOINT"; find . -name "$DTB_FILE" -print -quit )"
 	if [ ! -f "${MOUNTPOINT}/${DTBFILE}" ]; then
 		echo "ERROR: Device tree not found in deployed erlang application"
 		false # jump to the cleanup hook
@@ -261,8 +272,16 @@ $GRISP_UPDATE_TOOLS --name="$ERLANG_APP_NAME" \
                     "${SOFTWARE_PACKAGE}"
 tar cf "${SOFTWARE_PACKAGE}.tar" -C "${SOFTWARE_PACKAGE}" .
 rm -rf "${SOFTWARE_PACKAGE}"
-rm -f "${ROOTFS_IMAGE}"
 rm -f "${BOOTLOADER_IMAGE}"
+
+if [[ $KEEP_ROOTFS == 1 ]]; then
+	if [[ $COMPRESS_IMAGE == 1 ]]; then
+		gzip -f "${ROOTFS_IMAGE}"
+	fi
+else
+	rm -f "${ROOTFS_IMAGE}"
+fi
+
 
 if [[ $COMPRESS_IMAGE == 1 ]]; then
 	echo "*** COMPRESSING OUTPUT IMAGE AND CLEANING UP..."
