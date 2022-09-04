@@ -328,6 +328,7 @@ sdifa_partition_fat() {
 			_darwin_ensure_image_device
 			echo -ne "$payload" | fdisk -ry "$SDIFA_IMAGE_DEVICE" || exit $?
 			local part_name_list=$(_darwin_disk_partitions "$SDIFA_IMAGE_DEVICE")
+			part_name_list=$(echo "$part_name_list" | tr '\n' ' ')
 			local part_names=( )
 			read -r -a part_names <<< "$part_name_list"
 			for (( i=0; i<$index; i++ )); do
