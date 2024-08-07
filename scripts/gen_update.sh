@@ -8,11 +8,12 @@ set -o nounset
 ROOT="$( cd $( dirname $0 ); pwd )"
 
 GRISP_UPDATE_TOOLS="${ROOT}/grisp_updater_tools"
-BAREBOX_IMG_FILENAME="barebox-phytec-phycore-imx6ul-emmc-512mb.img"
+BAREBOX_IMG_FILENAME="barebox-phytec-phycore-imx6ull-emmc-512mb.img"
 BAREBOX_RELDIR="barebox"
 DEFAULT_BASENAME="grisp2"
 IMAGE_FILE_EXT=".img"
 DTB_FILE="imx6ul-grisp2.dtb"
+REBAR_PROFILE="prod"
 
 IMAGE_FILE=""
 SOFTWARE_PACKAGE=""
@@ -31,9 +32,11 @@ KEEP_ROOTFS=0
 
 function usage() {
 	local code="${1:-0}"
-	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE] [-c DEVICE_TREE_FILE]"
+	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-r REBAR_PROFILE] [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE] [-c DEVICE_TREE_FILE]"
 	echo "  -h: Show this help"
 	echo "  -d: Show debugging"
+	echo "  -r: rebar3 profile to use when deploying"
+	echo "    default: $REBAR_PROFILE"
 	echo "  -f: Force the overwrite of the output files"
 	echo "  -s: Include the RTEMS shell application in the image"
 	echo "  -z: Compress the output image; will add extention '.gz' to output file"
@@ -72,7 +75,7 @@ function error() {
 
 sdifa_check
 
-while getopts "hdfszt:i:a:n:v:o:u:b:c:k" o; do
+while getopts "hdfszt:i:a:n:v:o:u:b:c:r:k" o; do
 	case "${o}" in
 		h)
 			usage
@@ -117,6 +120,9 @@ while getopts "hdfszt:i:a:n:v:o:u:b:c:k" o; do
 			;;
 		c)
 			DTB_FILE="${OPTARG}"
+			;;
+		r)
+			REBAR_PROFILE="${OPTARG}"
 			;;
 		k)
 			KEEP_ROOTFS=1
@@ -222,10 +228,10 @@ MOUNTPOINT=$( sdifa_mountpoint 0 )
 
 echo "*** COMPILING ERLANG APPLICATION..."
 cd "$ERLANG_APP_DIR"
-rebar3 compile
+rebar3 as "$REBAR_PROFILE" compile
 
 echo "*** DEPLOYING ERLANG APPLICATION TO SYSTEM PARTITION A..."
-rebar3 grisp deploy --destination="$MOUNTPOINT" --pre-script="true" --post-script="true" --relname="$ERLANG_APP_NAME" --relvsn="$ERLANG_APP_VSN"
+rebar3 as "$REBAR_PROFILE" grisp deploy --destination="$MOUNTPOINT" --pre-script="true" --post-script="true" --relname="$ERLANG_APP_NAME" --relvsn="$ERLANG_APP_VSN"
 
 if [[ $RTEMS_SHELL == 1 ]]; then
 	echo "*** BUILDING RTEMS SHELL..."
