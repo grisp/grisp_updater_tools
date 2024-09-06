@@ -19,4 +19,5 @@ rebar3.crashdump
 *~
 *.gz
 *.tar
+.tool-versions
 scripts/grisp_updater_tools

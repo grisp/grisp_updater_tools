@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Add
+
+- Add the `-K/--key` option to the script `gen_update.sh` generate a signed
+  package.
+- Add the `--tar` option to `grisp_updater_tools` to directly generate a
+  tarball.
+
+### Changed
+
+- Now use the grisp_update_packager library to generate the software update
+  package.
+
 ## [0.1.0] - 2024-08-07
 
 First release.

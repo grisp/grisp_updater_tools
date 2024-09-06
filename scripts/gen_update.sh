@@ -23,6 +23,7 @@ BAREBOX_IMG=""
 ERLANG_APP_DIR="$PWD"
 ERLANG_APP_NAME=""
 ERLANG_APP_VSN=""
+SIGNING_KEY=""
 FORCE=0
 TRUNCATE=1
 RTEMS_SHELL=0
@@ -32,7 +33,7 @@ KEEP_ROOTFS=0
 
 function usage() {
 	local code="${1:-0}"
-	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-r REBAR_PROFILE] [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE] [-c DEVICE_TREE_FILE]"
+	echo "USAGE: $0 [-h] [-d] [-f] [-s] [-z] -t TOOLCHAIN_ROOT -n APP_NAME -v APP_VSN [-r REBAR_PROFILE] [-i BOOTLOADER_IMG] [-a ERLANG_APP_DIR] [-i OUTPUT_IMG] [-p SOFTWARE_PACKAGE] [-b PACKAGE_BLOCK_SIZE] [-c DEVICE_TREE_FILE] [-K PEM_FILE]"
 	echo "  -h: Show this help"
 	echo "  -d: Show debugging"
 	echo "  -r: rebar3 profile to use when deploying"
@@ -59,8 +60,9 @@ function usage() {
 	echo "  -c DEVICE_TREE_FILE: The name of the device tree file in the toolchain"
 	echo "    default: ${DTB_FILE}"
 	echo "  -k: Keep rootfs file. if -z is specified it will be compressed."
+	echo "  -K: The private key to use to sign the update package"
 	echo "e.g."
-	echo "       $0 -sz -t /opt/grisp/grisp2-rtems-toolchain -a ../grisp_demo -n grisp_demo -v 0.1.0"
+	echo "       $0 -sz -t /opt/grisp/grisp2-rtems-toolchain -r prod -a ../grisp_demo -n grisp_demo -v 0.1.0"
 	echo
 	exit $code
 }
@@ -75,7 +77,7 @@ function error() {
 
 sdifa_check
 
-while getopts "hdfszt:i:a:n:v:o:u:b:c:r:k" o; do
+while getopts "hdfszt:i:a:n:v:o:u:b:c:r:kK:" o; do
 	case "${o}" in
 		h)
 			usage
@@ -126,6 +128,9 @@ while getopts "hdfszt:i:a:n:v:o:u:b:c:r:k" o; do
 			;;
 		k)
 			KEEP_ROOTFS=1
+			;;
+		K)
+			SIGNING_KEY="${OPTARG}"
 			;;
 		*)
 			usage 1
@@ -189,7 +194,13 @@ if [ ! -d $(dirname "$SOFTWARE_PACKAGE") ]; then
 fi
 
 if ! [[ "$PACKAGE_BLOCK_SIZE" =~ ^[0-9]+$ ]]; then
-	error 1 "Invliad update block size: $PACKAGE_BLOCK_SIZE"
+	error 1 "Invalid update block size: $PACKAGE_BLOCK_SIZE"
+fi
+
+if [[ $SIGNING_KEY != "" ]]; then
+	if [ ! -f "$SIGNING_KEY" ]; then
+		error 1 "Signing key PEM file not found: $SIGNING_KEY [$(test -f "$SIGNING_KEY")]"
+	fi
 fi
 
 if [[ $FORCE == 1 ]]; then
@@ -272,12 +283,13 @@ BOOTLOADER_SIZE=$( sdifa_filesize "$BAREBOX_IMG" )
 sdifa_extract 0 $BOOTLOADER_SIZE "${BOOTLOADER_IMAGE}"
 $GRISP_UPDATE_TOOLS --name="$ERLANG_APP_NAME" \
                     --version="$ERLANG_APP_VSN" \
-                    --bootloader-image="$BAREBOX_IMG" \
-                    "mbr=system:dos:8192:524288,system:dos:532480:524288" \
+                    --bootloader-image="$BOOTLOADER_IMAGE" \
+                    --tar \
+                    ${SIGNING_KEY:+--key-file="$SIGNING_KEY"} \
+                    "mbr=system:fat:8192:524288,system:fat:532480:524288" \
                     "${ROOTFS_IMAGE}" \
-                    "${SOFTWARE_PACKAGE}"
-tar cf "${SOFTWARE_PACKAGE}.tar" -C "${SOFTWARE_PACKAGE}" .
-rm -rf "${SOFTWARE_PACKAGE}"
+                    "${SOFTWARE_PACKAGE}.tar"
+
 rm -f "${BOOTLOADER_IMAGE}"
 
 if [[ $KEEP_ROOTFS == 1 ]]; then
