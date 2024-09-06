@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2024-09-06
+
 ### Add
 
 - Add the `-K/--key` option to the script `gen_update.sh` generate a signed
@@ -23,5 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater_tools/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater_tools/compare/1.0.0...HEAD
+[1.0.0]: https://github.com/grisp/grisp_updater_tools/compare/0.1.0...1.0.0
 [0.1.0]: https://github.com/grisp/grisp_updater_tools/compare/e8bc0c5b824f45ffd4ce38c244801667bfdfb72b...0.1.0
