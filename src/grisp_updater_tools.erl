@@ -212,16 +212,17 @@ parse_structure(Struct) ->
 
 partition_role("system") -> system;
 partition_role("boot") -> boot;
-partition_role("data") -> data.
+partition_role("data") -> data;
+partition_role("reserved") -> reserved.
 
 mbr_type("dos") -> fat;
 mbr_type("fat") -> fat.
 
+gpt_type("R") -> reserved;
 gpt_type("L") -> linux;
 gpt_type("S") -> swap;
 gpt_type("H") -> home;
 gpt_type("U") -> efi;
-gpt_type("R") -> raid;
 gpt_type("V") -> llvm;
 gpt_type("F") -> bdp;
 gpt_type(Other) ->
@@ -315,7 +316,7 @@ package(Opts) ->
         key := Key
     } = Opts,
     SystemFileSpecs = case Opts of
-        #{kernel := KernelLocalPath, kernel_path := KernelTargetPath}
+        #{kernel_image := KernelLocalPath, kernel_path := KernelTargetPath}
           when KernelLocalPath =/= undefined, KernelTargetPath =/= undefined ->
             [#{name => <<"kernel">>,
                local => KernelLocalPath,
