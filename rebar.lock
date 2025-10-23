@@ -2,7 +2,7 @@
 [{<<"getopt">>,{pkg,<<"getopt">>,<<"1.0.2">>},0},
  {<<"grisp_update_packager">>,
   {git,"https://github.com/grisp/grisp_update_packager.git",
-       {ref,"0cff7ae0614184d7ae813f5e490993ff63c98e79"}},
+       {ref,"b4fcbe331670abb5fc786c636898d68e86f19171"}},
   0},
  {<<"quickrand">>,{pkg,<<"quickrand">>,<<"2.0.7">>},2},
  {<<"termseal">>,{pkg,<<"termseal">>,<<"0.1.1">>},0},
